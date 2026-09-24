@@ -1,8 +1,32 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
-import { Badge, Button, Card, CardSkeleton, Input, Modal, Toggle, ConfirmModal } from "@/shared/components";
+import { Badge, Button, Card, CardSkeleton, Input, Modal, Toggle, ConfirmModal, Select } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";
+
+const PROXY_TYPE_OPTIONS = [
+  { value: "http", label: "HTTP / HTTPS" },
+  { value: "socks5", label: "SOCKS5" },
+  { value: "cloudflare", label: "Cloudflare Relay" },
+  { value: "vercel", label: "Vercel Relay" },
+  { value: "deno", label: "Deno Relay" },
+];
+
+function getProxyUrlPlaceholder(type) {
+  switch (type) {
+    case "socks5":
+      return "socks5://127.0.0.1:1080";
+    case "cloudflare":
+      return "https://my-relay.workers.dev";
+    case "vercel":
+      return "https://my-relay.vercel.app";
+    case "deno":
+      return "https://my-relay.deno.net";
+    case "http":
+    default:
+      return "http://127.0.0.1:7897";
+  }
+}
 
 function getStatusVariant(status) {
   if (status === "active") return "success";
@@ -24,6 +48,7 @@ function normalizeFormData(data = {}) {
     noProxy: data.noProxy || "",
     isActive: data.isActive !== false,
     strictProxy: data.strictProxy === true,
+    type: data.type || "http",
   };
 }
 
@@ -106,12 +131,26 @@ export default function ProxyPoolsPage() {
   };
 
   const handleSave = async () => {
+    let proxyUrl = formData.proxyUrl.trim();
+    const type = formData.type || "http";
+
+    if (proxyUrl && !proxyUrl.includes("://")) {
+      if (type === "socks5") {
+        proxyUrl = `socks5://${proxyUrl}`;
+      } else if (type === "cloudflare" || type === "vercel" || type === "deno") {
+        proxyUrl = `https://${proxyUrl}`;
+      } else {
+        proxyUrl = `http://${proxyUrl}`;
+      }
+    }
+
     const payload = {
       name: formData.name.trim(),
-      proxyUrl: formData.proxyUrl.trim(),
+      proxyUrl,
       noProxy: formData.noProxy.trim(),
       isActive: formData.isActive === true,
       strictProxy: formData.strictProxy === true,
+      type,
     };
 
     if (!payload.name || !payload.proxyUrl) return;
@@ -454,9 +493,20 @@ export default function ProxyPoolsPage() {
     if (trimmed.includes("://")) {
       const parsed = new URL(trimmed);
       const hostLabel = parsed.port ? `${parsed.hostname}:${parsed.port}` : parsed.hostname;
+      let type = "http";
+      if (parsed.protocol === "socks5:" || parsed.protocol === "socks:") {
+        type = "socks5";
+      } else if (parsed.hostname.endsWith(".workers.dev")) {
+        type = "cloudflare";
+      } else if (parsed.hostname.endsWith(".vercel.app")) {
+        type = "vercel";
+      } else if (parsed.hostname.endsWith(".deno.dev") || parsed.hostname.endsWith(".deno.net")) {
+        type = "deno";
+      }
       return {
         proxyUrl: parsed.toString(),
         name: `Imported ${hostLabel}`,
+        type,
       };
     }
 
@@ -472,6 +522,7 @@ export default function ProxyPoolsPage() {
       return {
         proxyUrl: parsed.toString(),
         name: `Imported ${host}:${port}`,
+        type: "http",
       };
     }
 
@@ -536,6 +587,7 @@ export default function ProxyPoolsPage() {
             proxyUrl: entry.proxyUrl,
             noProxy: "",
             isActive: true,
+            type: entry.type || "http",
           }),
         });
 
@@ -721,6 +773,15 @@ export default function ProxyPoolsPage() {
                     )}
                     {pool.type === "cloudflare" && (
                       <Badge variant="default" size="sm">cloudflare relay</Badge>
+                    )}
+                    {pool.type === "deno" && (
+                      <Badge variant="default" size="sm">deno relay</Badge>
+                    )}
+                    {pool.type === "socks5" && (
+                      <Badge variant="default" size="sm">socks5</Badge>
+                    )}
+                    {(!pool.type || pool.type === "http") && (
+                      <Badge variant="default" size="sm">http</Badge>
                     )}
                     <Badge variant="default" size="sm">
                       {pool.boundConnectionCount || 0} bound
@@ -996,11 +1057,52 @@ export default function ProxyPoolsPage() {
             onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
             placeholder="Office Proxy"
           />
+          <Select
+            label="Proxy Type"
+            value={formData.type || "http"}
+            onChange={(e) => {
+              const newType = e.target.value;
+              setFormData((prev) => {
+                let updatedUrl = prev.proxyUrl;
+                if (newType === "socks5" && updatedUrl.startsWith("http://")) {
+                  updatedUrl = updatedUrl.replace(/^http:\/\//, "socks5://");
+                } else if (newType === "http" && updatedUrl.startsWith("socks5://")) {
+                  updatedUrl = updatedUrl.replace(/^socks5:\/\//, "http://");
+                }
+                return {
+                  ...prev,
+                  type: newType,
+                  proxyUrl: updatedUrl,
+                };
+              });
+            }}
+            options={PROXY_TYPE_OPTIONS}
+          />
           <Input
             label="Proxy URL"
             value={formData.proxyUrl}
-            onChange={(e) => setFormData((prev) => ({ ...prev, proxyUrl: e.target.value }))}
-            placeholder="http://127.0.0.1:7897"
+            onChange={(e) => {
+              const val = e.target.value;
+              setFormData((prev) => {
+                let newType = prev.type;
+                const trimmed = val.trim().toLowerCase();
+                if (trimmed.startsWith("socks5://") || trimmed.startsWith("socks://")) {
+                  newType = "socks5";
+                } else if (trimmed.includes(".workers.dev")) {
+                  newType = "cloudflare";
+                } else if (trimmed.includes(".vercel.app")) {
+                  newType = "vercel";
+                } else if (trimmed.includes(".deno.dev") || trimmed.includes(".deno.net")) {
+                  newType = "deno";
+                }
+                return {
+                  ...prev,
+                  proxyUrl: val,
+                  type: newType,
+                };
+              });
+            }}
+            placeholder={getProxyUrlPlaceholder(formData.type)}
           />
           <Input
             label="No Proxy"
