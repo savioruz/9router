@@ -738,6 +738,11 @@ function CapacityAdapterCap({ cap, entry, onChange, activeProviders, getCaps }) 
     patch({ models: [...models, model.value] });
   };
 
+  const handleDeselect = (model) => {
+    const next = models.filter((m) => m !== model.value);
+    patch({ models: next.length === 0 ? [DEFAULT_FALLBACK_MODEL] : next });
+  };
+
   const handleRemove = (index) => {
     const next = models.filter((_, i) => i !== index);
     patch({ models: next.length === 0 ? [DEFAULT_FALLBACK_MODEL] : next });
@@ -828,6 +833,7 @@ function CapacityAdapterCap({ cap, entry, onChange, activeProviders, getCaps }) 
           isOpen={showModelSelect}
           onClose={() => setShowModelSelect(false)}
           onSelect={handleAdd}
+          onDeselect={handleDeselect}
           activeProviders={activeProviders}
           title={`Add ${cap.label} Model`}
           addedModelValues={models}
